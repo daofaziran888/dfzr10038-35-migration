@@ -71,6 +71,17 @@ class BaseModuleService:
         entry["abnormal"] = action in self.NEGATIVE_ACTIONS
         return entry, f"{self.ENTITY}已{action}"
 
+    def perform_action(
+        self, entry_id: int, action: str, remark: str | None = None
+    ) -> tuple[dict[str, Any] | None, str, bool]:
+        """动作执行入口：业务服务可覆写，返回 (entry, message, ok)。
+
+        默认沿用状态流转；需要前置校验或跨模块副作用的动作在子类里覆写，
+        被校验拦下时把 ok 置为 False，避免沿用旧状态却对外报告成功。
+        """
+        entry, message = self.run_action(entry_id, action)
+        return entry, message, entry is not None
+
     def domain_snapshot(self) -> dict[str, Any]:
         """输出模块级数据质量快照，供跨模块消费和题位源码锚点使用。"""
         rows = store.rows(self.MODULE)

@@ -82,7 +82,6 @@ def get_entry(module: str, entry_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"{service.ENTITY} {entry_id} 不存在或已归档")
     return entry
 
-
 @router.post("/{module}", response_model=ActionResult)
 def create_entry(module: str, payload: EntryPayload) -> ActionResult:
     service = require_service(module)
@@ -110,8 +109,10 @@ def get_flow_trace(module: str, entry_id: int):
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
 def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResult:
     service = require_service(module)
-    entry, message = service.run_action(entry_id, payload.action.strip())
-    # 动作执行后触发跨模块数据流
-    flow_result = flow_engine.on_action(module, payload.action.strip(), entry_id)
-    return ActionResult(ok=entry is not None, message=message, entry=entry,
+    action = payload.action.strip()
+    entry, message, ok = service.perform_action(entry_id, action, payload.remark)
+    # 动作执行后触发跨模块数据流；被前置校验拦下的动作不产生副作用。
+    flow_result = flow_engine.on_action(module, action, entry_id) if ok else {
+        "chains": [], "effects": [], "hits": 0}
+    return ActionResult(ok=ok, message=message, entry=entry,
                         flow=flow_result if flow_result["hits"] > 0 else None)

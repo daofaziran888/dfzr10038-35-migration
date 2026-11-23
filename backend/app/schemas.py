@@ -30,3 +30,12 @@ class EntryPayload(BaseModel):
 class ActionPayload(BaseModel):
     action: str
     remark: str | None = None
+
+
+class VerifyItemPayload(BaseModel):
+    token: str
+    resolution: str | None = None
+
+
+class FeatureValueQuery(BaseModel):
+    preview_version: str | None = None

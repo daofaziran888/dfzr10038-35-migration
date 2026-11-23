@@ -317,8 +317,8 @@ def flow_lineage_to_version_to_mon(feature_line_id: int) -> list[FlowEffect]:
 
 
 @_register(
-    "version_mgr/全量切换 → online_serv/部署服务(热加载)",
-    desc="版本全量切换后触发在线服务热加载，更新服务端点特征列表。",
+    "version_mgr/全量切换 → online_serv/热加载(端点特征版本数据)",
+    desc="版本全量切换后触发在线服务热加载，只更新端点特征版本数据中该特征的绑定。",
 )
 def flow_version_to_online(version_mgr_id: int) -> list[FlowEffect]:
     effects: list[FlowEffect] = []
@@ -329,39 +329,29 @@ def flow_version_to_online(version_mgr_id: int) -> list[FlowEffect]:
     ver_no = str(vm.get("版本编号", ""))
     feat = str(vm.get("关联特征", ""))
     ver_label = str(vm.get("版本标签", ""))
+    receipt = vm.get("最近切换回执") or {}
+    switched = {
+        item.get("端点编号") for item in receipt.get("端点", [])
+        if item.get("结果") == "已生效"
+    }
 
-    # 触发在线服务热加载
-    online_rows = store.rows("online_serv")
-    updated = False
-    for orow in online_rows:
-        if orow.get("status") == "运行中":
-            orig_features = str(orow.get("特征列表", ""))
-            orow["特征列表"] = f"{orig_features},v{ver_label}"
-            orow["热加载"] = f"已重载({ver_no})"
-            orow["last_version_switch"] = datetime.datetime.now().isoformat()
-            orow["triggered_by"] = f"version_mgr/{ver_no}"
-            effects.append(FlowEffect(
-                "热加载服务", "online_serv", int(orow.get("id", 0)),
-                f"版本 {ver_no}({ver_label}) 全量切换后热加载在线服务 {orow.get('端点编号','')}",
-            ))
-            updated = True
-            break
-
-    if not updated:
-        # 如果无运行中端点则部署新端点
-        for orow in online_rows:
-            if orow.get("status") == "待部署":
-                orow["status"] = "运行中"
-                orow["pending"] = True
-                orow["热加载"] = "已开启"
-                orow["运行状态"] = "SERVING"
-                orow["特征列表"] = feat
-                orow["triggered_by"] = f"version_mgr/{ver_no}"
-                effects.append(FlowEffect(
-                    "部署服务", "online_serv", int(orow.get("id", 0)),
-                    f"版本 {ver_no} 全量切换后部署在线服务 {orow.get('端点编号','')}",
-                ))
-                break
+    for orow in store.rows("online_serv"):
+        if orow.get("status") != "运行中" or orow.get("端点编号") not in switched:
+            continue
+        # 版本标签不再拼进特征列表：身份与绑定分别存放在端点特征版本数据中。
+        orow["热加载"] = f"已重载({ver_no})"
+        orow["last_version_switch"] = datetime.datetime.now().isoformat()
+        orow["triggered_by"] = f"version_mgr/{ver_no}"
+        binding = next(
+            (entry for entry in orow.get("端点特征版本") or []
+             if entry.get("特征身份") == feat),
+            {},
+        )
+        effects.append(FlowEffect(
+            "热加载服务", "online_serv", int(orow.get("id", 0)),
+            f"版本 {ver_no}({ver_label}) 全量切换后热加载在线服务 "
+            f"{orow.get('端点编号','')}：{feat} 绑定 {binding.get('绑定版本', '')}",
+        ))
 
     return effects
 

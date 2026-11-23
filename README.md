@@ -81,5 +81,39 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 端点特征版本迁移与切换
+
+旧版在线端点把版本标签直接拼进逗号分隔的 `特征列表`（如
+`order_amount_30d,v2,v1`）。迁移把这些字符串拆成 **特征身份** 与 **绑定版本**
+两部分，写入第二版端点特征版本数据（端点行上的 `端点特征版本`）。
+
+规则集中在 `backend/app/domain/endpoint_versions.py`（纯函数）和
+`backend/app/services/endpoint_inventory.py`（清单状态机）：
+
+- 在 `feature_reg` 查得到的名字一律按真实特征保留，`v3` 这类真实特征不会被
+  当成版本标签删除；未登记且形如 `vN` 的才归为旧版本标签，保留原值和来源。
+- 无法核实的旧项记为“待核实”，保留原值、原因和补核方式，不阻断其他特征的绑定。
+- 金额特征 `order_amount_30d` 的已核实旧绑定迁移前从旧清单读到 `10`，
+  目标版本 `v3` 读到 `12`。
+- 端点清单是**只读的复查凭据**：确认后切换不会改写它，回执里的清单指纹与清单一致。
+- 存在待核实项或端点尚未迁移时，`全量切换` 返回 `ok=false` 并落一条“未生效”回执，
+  版本状态保持原样，端点继续服务旧值。
+
+专用接口（`backend/app/routers/feature_versions.py`）：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/online_serv/{id}/feature-inventory` | 迁移样本：身份与绑定分开的清单 |
+| POST | `/api/online_serv/{id}/feature-inventory/migrate` | 重新生成草稿清单 |
+| POST | `/api/online_serv/{id}/feature-inventory/verify` | 补核单个旧项（保留原值） |
+| POST | `/api/online_serv/{id}/feature-inventory/confirm` | 确认唯一清单并写入版本数据 |
+| GET | `/api/online_serv/{id}/features/{feature}/value` | 按端点特征版本数据读实际特征值 |
+| GET | `/api/online_serv/{id}/readiness` | 判断此刻切换是否生效及补核方式 |
+| GET | `/api/version_mgr/{id}/switch-preflight` | 切换前预检 |
+| GET | `/api/version_mgr/{id}/receipt` | 版本管理的切换回执 |
+
+端到端校验：`cd backend && .venv/bin/python tests/test_endpoint_versions.py`
+（脚本自行拉起临时端口，逐项验证迁移、补核、并发确认、切换与回执）。
+
 领域：数据工程
 子方向：数仓与数据湖
